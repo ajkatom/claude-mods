@@ -4,43 +4,46 @@ import type { AskedFor } from '../types'
 
 import { CHOICES, estimateTokens, fmt, question } from './advice'
 
-// `startedAt` of the session the check was already offered in. A resumed
-// session has turns before its first prompt; a fresh one has none. Keyed on
-// startedAt so a hot reload (session.start fires again) does not re-ask.
+// `startedAt` of the session the check was already settled for (asked, or
+// found fresh). Lives in $.state so a hot reload does not re-ask; /clear
+// resets startedAt, so a cleared session is a new one.
 const askedFor = { plugin: 'context-check', key: 'askedFor' } as const
 
+// Prompts a person typed, wherever they typed them. Deliveries from tasks,
+// peers, schedules and plugins pass straight through.
+const TYPED = new Set(['composer', 'bridge', 'sdk'])
+
 export const register: Register = on => {
-  // Armed for the next user prompt when the session already holds turns.
-  let armed = false
-
-  on('session.start', async ($, e, next) => {
-    const turns = await $.session.turns()
-    if (turns > 0) {
-      const { startedAt } = await $.session.usage()
-      const { value } = await $.state.get(askedFor)
-      armed = value !== startedAt
-    }
-    return next(e)
-  })
-
   on('prompt.submit', async ($, e, next) => {
-    const isTyped = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
-    if (!armed || !isTyped) return next(e)
-    armed = false
+    if (!TYPED.has(e.origin.kind)) return next(e)
 
     let usage
     try {
       usage = await $.session.usage({ breakdown: 'summary' })
     } catch (err) {
-      $.ui.log(`context-check: could not read usage (${String(err)})`, { to: 'debug' })
+      $.ui.log(`context-check: could not read usage (${String(err)})`)
       return next(e)
     }
+
+    const { value: settled } = await $.state.get(askedFor)
+    if (settled === usage.startedAt) return next(e)
     const asked: AskedFor = usage.startedAt
     await $.state.set(askedFor, asked)
+
+    // A fresh session has no messages yet; only a resumed one is worth a check.
+    const prior = (await $.session.messages()).length
+    if (prior === 0) {
+      $.ui.log('context-check: fresh session, no check', { to: 'debug' })
+      return next(e)
+    }
 
     const window = usage.context.window
     const context = usage.context.breakdown?.totalTokens ?? usage.context.tokens ?? 0
     const prompt = estimateTokens(e.text)
+    $.ui.log(
+      `context-check: resumed session, ${prior} messages, ~${fmt(context)} context tokens`,
+      { to: 'debug' },
+    )
 
     let choice: string
     try {
@@ -48,8 +51,9 @@ export const register: Register = on => {
         options: CHOICES,
         header: 'Context',
       })
-    } catch {
+    } catch (err) {
       // Dismissed, or nobody to ask: let the prompt through untouched.
+      $.ui.log(`context-check: dialog closed (${String(err)}); continuing`, { to: 'debug' })
       return next(e)
     }
 

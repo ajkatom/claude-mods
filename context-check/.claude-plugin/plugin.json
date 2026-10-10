@@ -1,6 +1,6 @@
 {
   "name": "context-check",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "On the first prompt of a resumed session, shows the context tokens that prompt will send and asks: continue, compact or clear.",
   "types": "./types/index.d.ts",
   "author": {
