@@ -1,0 +1,7 @@
+{
+  "name": "claude-mods",
+  "owner": { "name": "ajkatom" },
+  "plugins": [
+    { "name": "context-check", "source": "./context-check" }
+  ]
+}
