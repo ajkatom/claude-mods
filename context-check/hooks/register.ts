@@ -15,7 +15,10 @@ const TYPED = new Set(['composer', 'bridge', 'sdk'])
 
 export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
-    if (!TYPED.has(e.origin.kind)) return next(e)
+    if (!TYPED.has(e.origin.kind)) {
+      $.ui.log(`context-check: skipping prompt from origin ${e.origin.kind}`, { to: 'debug' })
+      return next(e)
+    }
 
     let usage
     try {
@@ -40,9 +43,9 @@ export const register: Register = on => {
     const window = usage.context.window
     const context = usage.context.breakdown?.totalTokens ?? usage.context.tokens ?? 0
     const prompt = estimateTokens(e.text)
+    const pct = window > 0 ? Math.round(((context + prompt) / window) * 100) : 0
     $.ui.log(
-      `context-check: resumed session, ${prior} messages, ~${fmt(context)} context tokens`,
-      { to: 'debug' },
+      `context-check: resumed session (${prior} messages); this prompt sends ~${fmt(context + prompt)} tokens (${pct}% of ${fmt(window)})`,
     )
 
     let choice: string
@@ -53,7 +56,7 @@ export const register: Register = on => {
       })
     } catch (err) {
       // Dismissed, or nobody to ask: let the prompt through untouched.
-      $.ui.log(`context-check: dialog closed (${String(err)}); continuing`, { to: 'debug' })
+      $.ui.log(`context-check: could not show the dialog (${String(err)}); continuing`)
       return next(e)
     }
 
